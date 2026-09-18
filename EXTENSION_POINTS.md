@@ -1,6 +1,6 @@
 # Evo Flow — Extension Points
 
-**Contract version:** `1.1.0`
+**Contract version:** `1.3.0`
 **Stack:** NestJS 11 + TypeScript + TypeORM + BullMQ + Temporal
 
 Evo Flow is the automation engine of the Evo CRM Community family. It powers journeys, segments, campaigns, events, and click-tracking. This document declares the **public extension points** that the runtime exposes so external consumers can compose, replace, or extend behavior without forking the codebase.
@@ -271,6 +271,58 @@ The HTTP path wraps the whole request handler in this through a per-request inte
 
 ---
 
+### 6. `outbound_headers`
+
+**Version:** `1.0.0` (added in contract `1.3.0`)
+**Default:** returns `{}` — nothing extra is sent.
+
+```ts
+type OutboundHeadersImpl = () => Record<string, string>;
+```
+
+Opaque headers merged into every broker publish and every call to the CRM (`CrmClientService`, `CrmInboxDispatcher`). The runtime never reads the map. Headers set by the caller or the transport (`X-Service-Token`, `correlationId`, `messageId`, …) win on a key clash.
+
+**Breaking-change policy:** changing where the map is applied, or letting it override the runtime's own headers, is a major bump.
+
+---
+
+### 7. `inbound_message_context`
+
+**Version:** `1.0.0` (added in contract `1.3.0`)
+**Default:** runs `work` unchanged.
+
+```ts
+type InboundMessageContextImpl = <T>(
+  headers: Record<string, string>,
+  work: () => Promise<T>,
+) => Promise<T>;
+```
+
+Wraps the processing of every broker message (all topics, both adapters) with the headers it was published with, so a consumer can restore whatever `outbound_headers` put on the wire. It runs outside the consumer's own CLS scope, which inherits from it. Ack/nack still happens inside `work`; an error thrown before `work` runs leaves the message un-acked, exactly like a handler error.
+
+**Breaking-change policy:** changing the signature or moving the wrap inside the ack policy is a major bump.
+
+---
+
+### 8. `temporal_interceptors`
+
+**Version:** `1.0.0` (added in contract `1.3.0`)
+**Default:** returns `{}` — the campaign client and worker run without interceptors.
+
+```ts
+interface TemporalInterceptorSet {
+  client?: ClientInterceptors;
+  worker?: Pick<WorkerInterceptors, 'activity' | 'workflowModules'>;
+}
+type TemporalInterceptorsImpl = (dataSource: DataSource) => TemporalInterceptorSet;
+```
+
+`client` is passed to the `Client` that starts campaign workflows; `worker` to the campaign `Worker.create`. Workflow interceptors run inside the workflow sandbox, so they are handed over as module paths (`workflowModules`), never as objects. `dataSource` is the application's, for activity interceptors that need it.
+
+**Breaking-change policy:** changing the signature or the set of Temporal clients/workers it is applied to is a major bump.
+
+---
+
 ## How to use as a consumer
 
 The example below assembles a hypothetical consumer that registers all four hooks. It does not import or reference any private code; everything it needs is in this document and in the community runtime.
@@ -336,5 +388,7 @@ The runtime never auto-downloads, auto-updates, or executes remote plugins witho
 
 ## Versioning history
 
+- **`1.3.0`** — Adds `outbound_headers`, `inbound_message_context` and `temporal_interceptors`: opaque transport for context that must cross the broker, Temporal and calls to the CRM. Additive minor bump — every default is a no-op.
+- **`1.2.0`** — Adds `cache_key_scope`. Additive minor bump — the default returns `''`.
 - **`1.1.0`** — Adds `tenant_db_context` (ADR14, story 10.1b): the DB-context seam that scopes tenant queries to an RLS-aware connection. Additive minor bump — the default is a no-op passthrough, so existing consumers are unaffected.
 - **`1.0.0`** — Initial release of the contract. Declares `capability_gate`, `runtime_context`, `plugin_loader`, and `theme_tokens` as the four supported extension points.

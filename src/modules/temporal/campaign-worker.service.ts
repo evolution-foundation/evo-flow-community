@@ -1,8 +1,10 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Worker, NativeConnection } from '@temporalio/worker';
+import { DataSource } from 'typeorm';
 import { campaignExecutionActivities } from './activities/campaign-execution.activities';
 import { CustomLoggerService } from 'src/common/services/custom-logger.service';
 import { AppFactory } from '../../app-factory';
+import { EvoExtensionPoints } from '../../evo-extension-points/registry';
 
 /**
  * Campaign Temporal Worker Service
@@ -17,6 +19,8 @@ export class CampaignWorkerService implements OnModuleInit, OnModuleDestroy {
   private isInitializing: boolean = false;
   private retryAttempts: number = 0;
   private maxRetries: number = 5;
+
+  constructor(private readonly dataSource: DataSource) {}
 
   async onModuleInit() {
     // Only start campaign worker in campaign-enabled modes
@@ -73,6 +77,9 @@ export class CampaignWorkerService implements OnModuleInit, OnModuleDestroy {
         activities: {
           ...campaignExecutionActivities,
         },
+        interceptors: EvoExtensionPoints.get('temporal_interceptors')(
+          this.dataSource,
+        ).worker,
         reuseV8Context: true,
         maxConcurrentActivityTaskExecutions: 100,
         maxConcurrentWorkflowTaskExecutions: 100,

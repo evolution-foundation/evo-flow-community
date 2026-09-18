@@ -19,6 +19,7 @@ import {
   type ContactsClientTerminalReason,
 } from './contacts-client.metrics';
 import { readCorrelationIdFromCls } from '../correlation/correlation.util';
+import { EvoExtensionPoints } from '../../evo-extension-points/registry';
 import type { RequestOptions } from './types/responses';
 
 export interface CrmApiResponse<T = any> {
@@ -545,6 +546,7 @@ export class CrmClientService {
 
   private buildHeaders(opts?: RequestOptions): Record<string, string> {
     const headers: Record<string, string> = {
+      ...EvoExtensionPoints.get('outbound_headers')(),
       'Content-Type': 'application/json',
       'User-Agent': 'EvoFlow-CrmClient/1.0',
     };

@@ -24,7 +24,15 @@ export interface BrokerHealth {
 }
 
 export interface IMessageBroker {
-  publish<T>(topic: string, payload: T): Promise<void>;
+  /**
+   * `headers` travel with the message and come back in `BrokerMessage.headers`.
+   * The adapter's own keys (`correlationId`, `messageId`, `content-type`) win.
+   */
+  publish<T>(
+    topic: string,
+    payload: T,
+    headers?: Record<string, string>,
+  ): Promise<void>;
   subscribe<T>(
     topic: string,
     handler: (msg: BrokerMessage<T>) => Promise<void>,

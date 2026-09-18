@@ -13,6 +13,10 @@ export {
   ThemeTokens,
   ThemeTokensImpl,
   TenantDbContextImpl,
+  OutboundHeadersImpl,
+  InboundMessageContextImpl,
+  TemporalInterceptorSet,
+  TemporalInterceptorsImpl,
   ExtensionPointImplementations,
 } from './registry';
 
