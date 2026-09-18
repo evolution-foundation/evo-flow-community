@@ -1,4 +1,9 @@
-import { publishCampaignsPack } from './campaign-execution.activities';
+import {
+  publishCampaignsPack,
+  updateCampaignStatus,
+} from './campaign-execution.activities';
+import { TenantDbContext } from '../../../evo-extension-points';
+import { Campaign } from '../../campaigns/entities/campaign.entity';
 import { IMESSAGE_BROKER } from '../../../shared/broker/interfaces/message-broker.interface';
 import {
   CAMPAIGNS_PACK_TOPIC,
@@ -65,5 +70,22 @@ describe('publishCampaignsPack activity', () => {
         correlationId: CORRELATION_ID,
       }),
     ).rejects.toThrow('broker timeout');
+  });
+});
+
+describe('updateCampaignStatus activity', () => {
+  it('writes through the tenant DB seam, not the global pool', async () => {
+    const update = jest.fn().mockResolvedValue(undefined);
+    const getRepository = jest.fn().mockReturnValue({ update });
+    mockAppGet
+      .mockReset()
+      .mockImplementation((token) =>
+        token === TenantDbContext ? { getRepository } : undefined,
+      );
+
+    await updateCampaignStatus({ campaignId: CAMPAIGN_ID, status: 2 });
+
+    expect(getRepository).toHaveBeenCalledWith(Campaign);
+    expect(update).toHaveBeenCalledWith({ id: CAMPAIGN_ID }, { status: 2 });
   });
 });

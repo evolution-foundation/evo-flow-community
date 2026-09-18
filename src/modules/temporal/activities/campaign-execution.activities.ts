@@ -7,6 +7,7 @@ import { Campaign } from '../../campaigns/entities/campaign.entity';
 import { CampaignExecution } from '../../campaigns/entities/campaign-execution.entity';
 import { CampaignContactStatus } from '../../campaigns/entities/campaign-contact.entity';
 import { runActivityInTenantDbContext } from '../tenant-activity-context';
+import { TenantDbContext } from '../../../evo-extension-points';
 import {
   IMESSAGE_BROKER,
   IMessageBroker,
@@ -277,11 +278,7 @@ export async function updateCampaignStatus(
 
   try {
     const app = await getAppContext();
-    const campaignsService = app.get(CampaignsService);
-    const dataSource = app.get('DataSource');
-
-    // Get campaign repository
-    const campaignRepo = dataSource.getRepository('Campaign');
+    const campaignRepo = app.get(TenantDbContext).getRepository(Campaign);
 
     // Build update object
     const updates: any = {

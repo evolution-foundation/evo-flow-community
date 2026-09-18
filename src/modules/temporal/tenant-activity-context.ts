@@ -1,5 +1,9 @@
 import type { EntityManager } from 'typeorm';
-import { runInTenantDbContext } from '../../evo-extension-points';
+import { ClsServiceManager } from 'nestjs-cls';
+import {
+  runInTenantDbContext,
+  TENANT_DB_MANAGER_CLS_KEY,
+} from '../../evo-extension-points';
 
 /**
  * Tenant-DB seam for **Temporal activities** (ADR14, story 10.1b).
@@ -32,9 +36,22 @@ export async function runActivityInTenantDbContext<T>(
   tenantId: string | null | undefined,
   work: (manager: EntityManager) => Promise<T>,
 ): Promise<T> {
+  // An activity interceptor may already have bound a manager for this
+  // execution; without a tenant in the payload, run on that one.
+  if (tenantId == null) {
+    const bound = boundManager();
+    if (bound) return work(bound);
+  }
   const { AppDataSource } = await import('../../database/ormconfig');
   if (!AppDataSource.isInitialized) {
     await AppDataSource.initialize();
   }
   return runInTenantDbContext(AppDataSource, tenantId ?? null, work);
+}
+
+function boundManager(): EntityManager | undefined {
+  const cls = ClsServiceManager.getClsService();
+  return cls.isActive()
+    ? cls.get<EntityManager | undefined>(TENANT_DB_MANAGER_CLS_KEY)
+    : undefined;
 }
