@@ -611,6 +611,7 @@ export class CrmClientService {
 
   private getHeaders(): Record<string, string> {
     return {
+      ...EvoExtensionPoints.get('outbound_headers')(),
       'Content-Type': 'application/json',
       'X-Service-Token': this.serviceToken,
       'User-Agent': 'EvoAI-Campaign-Temporal/1.0',

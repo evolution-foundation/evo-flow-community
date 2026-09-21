@@ -298,7 +298,7 @@ type InboundMessageContextImpl = <T>(
 ) => Promise<T>;
 ```
 
-Wraps the processing of every broker message (all topics, both adapters) with the headers it was published with, so a consumer can restore whatever `outbound_headers` put on the wire. It runs outside the consumer's own CLS scope, which inherits from it. Ack/nack still happens inside `work`; an error thrown before `work` runs leaves the message un-acked, exactly like a handler error.
+Wraps the processing of every broker message (all topics, both adapters) with the headers it was published with, so a consumer can restore whatever `outbound_headers` put on the wire. It runs outside the consumer's own CLS scope, which inherits from it. Ack/nack still happens inside `work`; an error thrown before `work` runs leaves the message un-acked, exactly like a handler error. Do not hold a database transaction across `work`: consumers write row by row and ack inside it, so each write must commit on its own (a redelivered page relies on the rows it already claimed).
 
 **Breaking-change policy:** changing the signature or moving the wrap inside the ack policy is a major bump.
 
@@ -325,7 +325,7 @@ type TemporalInterceptorsImpl = (dataSource: DataSource) => TemporalInterceptorS
 
 ## How to use as a consumer
 
-The example below assembles a hypothetical consumer that registers all four hooks. It does not import or reference any private code; everything it needs is in this document and in the community runtime.
+The example below assembles a hypothetical consumer that registers four of the hooks; the others are registered the same way. It does not import or reference any private code; everything it needs is in this document and in the community runtime.
 
 ```ts
 import { NestFactory } from '@nestjs/core';

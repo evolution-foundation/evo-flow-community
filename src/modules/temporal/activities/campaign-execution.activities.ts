@@ -7,7 +7,6 @@ import { Campaign } from '../../campaigns/entities/campaign.entity';
 import { CampaignExecution } from '../../campaigns/entities/campaign-execution.entity';
 import { CampaignContactStatus } from '../../campaigns/entities/campaign-contact.entity';
 import { runActivityInTenantDbContext } from '../tenant-activity-context';
-import { TenantDbContext } from '../../../evo-extension-points';
 import {
   IMESSAGE_BROKER,
   IMessageBroker,
@@ -277,9 +276,6 @@ export async function updateCampaignStatus(
   });
 
   try {
-    const app = await getAppContext();
-    const campaignRepo = app.get(TenantDbContext).getRepository(Campaign);
-
     // Build update object
     const updates: any = {
       status: input.status,
@@ -293,12 +289,10 @@ export async function updateCampaignStatus(
       updates.sentPercentage = input.sentPercentage;
     }
 
-    // Update campaign
-    await campaignRepo.update(
-      {
-        id: input.campaignId,
-      },
-      updates,
+    // Same posture as updateExecutionProgress: with no tenant bound, the
+    // overlay refuses instead of updating zero rows on the global pool.
+    await runActivityInTenantDbContext(undefined, (manager) =>
+      manager.getRepository(Campaign).update({ id: input.campaignId }, updates),
     );
 
     log.info('Campaign status updated successfully', {

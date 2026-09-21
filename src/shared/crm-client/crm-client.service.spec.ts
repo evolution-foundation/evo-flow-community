@@ -33,6 +33,7 @@ process.env.EVOAI_CRM_CIRCUIT_THRESHOLD = '3';
 process.env.EVOAI_CRM_CLIENT_RETRY_BACKOFF_MS = '0';
 
 import { CrmClientService } from './crm-client.service';
+import { EvoExtensionPoints } from '../../evo-extension-points';
 
 function buildFetchResponse(opts: {
   ok?: boolean;
@@ -445,6 +446,40 @@ describe('CrmClientService', () => {
 
       const [, init] = fetchMock.mock.calls[0];
       expect(init.headers['X-Request-Id']).toBe('tx-xyz');
+    });
+  });
+  describe('outbound_headers', () => {
+    beforeEach(() => {
+      EvoExtensionPoints.replace('outbound_headers', () => ({
+        'x-ctx': 'from-overlay',
+        'X-Service-Token': 'must-not-win',
+      }));
+      fetchMock.mockResolvedValue(
+        buildFetchResponse({ status: 200, body: {} }),
+      );
+    });
+    afterEach(() => EvoExtensionPoints.reset());
+
+    const sentHeaders = (): Record<string, string> =>
+      (fetchMock.mock.calls[0][1] as { headers: Record<string, string> })
+        .headers;
+
+    it('rides the generic request path', async () => {
+      await service.get('/api/v1/contacts/c-1');
+
+      expect(sentHeaders()).toMatchObject({
+        'x-ctx': 'from-overlay',
+        'X-Service-Token': 'svc-token',
+      });
+    });
+
+    it('rides the legacy request path used by the journey nodes', async () => {
+      await service.getConversation({ conversationId: 'conv-1' } as never);
+
+      expect(sentHeaders()).toMatchObject({
+        'x-ctx': 'from-overlay',
+        'X-Service-Token': 'svc-token',
+      });
     });
   });
 });
