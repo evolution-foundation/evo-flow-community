@@ -1,4 +1,14 @@
-import { publishCampaignsPack } from './campaign-execution.activities';
+import {
+  publishCampaignsPack,
+  updateCampaignStatus,
+} from './campaign-execution.activities';
+import { EntityManager } from 'typeorm';
+import { ClsServiceManager } from 'nestjs-cls';
+import {
+  EvoExtensionPoints,
+  TENANT_DB_MANAGER_CLS_KEY,
+} from '../../../evo-extension-points';
+import { Campaign } from '../../campaigns/entities/campaign.entity';
 import { IMESSAGE_BROKER } from '../../../shared/broker/interfaces/message-broker.interface';
 import {
   CAMPAIGNS_PACK_TOPIC,
@@ -12,6 +22,9 @@ import {
 const mockAppGet = jest.fn();
 jest.mock('../../../shared/app-context.holder', () => ({
   getAppContext: () => ({ get: mockAppGet }),
+}));
+jest.mock('../../../database/ormconfig', () => ({
+  AppDataSource: { isInitialized: true },
 }));
 jest.mock('@temporalio/activity', () => ({
   log: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
@@ -65,5 +78,47 @@ describe('publishCampaignsPack activity', () => {
         correlationId: CORRELATION_ID,
       }),
     ).rejects.toThrow('broker timeout');
+  });
+});
+
+describe('updateCampaignStatus activity', () => {
+  afterEach(() => EvoExtensionPoints.reset());
+
+  it('writes on the manager an activity interceptor bound for the tenant', async () => {
+    const update = jest.fn().mockResolvedValue(undefined);
+    const getRepository = jest.fn().mockReturnValue({ update });
+    const cls = ClsServiceManager.getClsService();
+
+    await cls.run(() => {
+      cls.set(TENANT_DB_MANAGER_CLS_KEY, { getRepository });
+      return updateCampaignStatus({ campaignId: CAMPAIGN_ID, status: 2 });
+    });
+
+    expect(getRepository).toHaveBeenCalledWith(Campaign);
+    expect(update).toHaveBeenCalledWith({ id: CAMPAIGN_ID }, { status: 2 });
+  });
+
+  it('asks the tenant DB seam with no tenant when nothing is bound, so the overlay can refuse', async () => {
+    EvoExtensionPoints.replace('tenant_db_context', (_ds, tenantId) => {
+      expect(tenantId).toBeNull();
+      throw new Error('TENANT_CONTEXT_REQUIRED');
+    });
+
+    await expect(
+      updateCampaignStatus({ campaignId: CAMPAIGN_ID, status: 2 }),
+    ).rejects.toThrow('TENANT_CONTEXT_REQUIRED');
+  });
+
+  it('keeps writing in community, where the seam is a passthrough', async () => {
+    const update = jest.fn().mockResolvedValue(undefined);
+    EvoExtensionPoints.replace('tenant_db_context', (_ds, _tenantId, work) =>
+      work({
+        getRepository: () => ({ update }),
+      } as unknown as EntityManager),
+    );
+
+    await updateCampaignStatus({ campaignId: CAMPAIGN_ID, status: 2 });
+
+    expect(update).toHaveBeenCalledWith({ id: CAMPAIGN_ID }, { status: 2 });
   });
 });

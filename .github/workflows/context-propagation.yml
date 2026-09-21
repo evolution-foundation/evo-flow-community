@@ -1,0 +1,56 @@
+name: context propagation suite
+
+# Pins the transport that lets an overlay carry opaque context across the
+# broker, the campaign Temporal client/worker and calls to the CRM
+# (outbound_headers, inbound_message_context, temporal_interceptors), plus the
+# campaign activities that write through the tenant DB seam. Everything is
+# mocked: no broker, Temporal or database service is needed.
+#
+# --forceExit: crm-client.service.spec leaves an open handle that predates this
+# lane, so jest would otherwise never exit.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'src/evo-extension-points/**'
+      - 'src/shared/broker/**'
+      - 'src/shared/crm-client/**'
+      - 'src/shared/messaging-channels/dispatchers/crm-inbox.dispatcher*'
+      - 'src/modules/temporal/**'
+      - 'src/modules/campaigns/services/campaign-workflow.service.ts'
+      - '.github/workflows/context-propagation.yml'
+  push:
+    branches: [main, develop]
+    paths:
+      - 'src/evo-extension-points/**'
+      - 'src/shared/broker/**'
+      - 'src/shared/crm-client/**'
+      - 'src/shared/messaging-channels/dispatchers/crm-inbox.dispatcher*'
+      - 'src/modules/temporal/**'
+      - 'src/modules/campaigns/services/campaign-workflow.service.ts'
+      - '.github/workflows/context-propagation.yml'
+
+jobs:
+  context-propagation:
+    name: context propagation suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run context propagation suite
+        run: >-
+          npx jest --runInBand --forceExit
+          src/evo-extension-points
+          src/shared/broker/context-propagating.broker.spec.ts
+          src/shared/broker/broker.module.spec.ts
+          src/shared/crm-client/crm-client.service.spec.ts
+          src/shared/messaging-channels/dispatchers/crm-inbox.dispatcher.spec.ts
+          src/modules/temporal/tenant-activity-context.spec.ts
+          src/modules/temporal/activities/campaign-execution.activities.spec.ts

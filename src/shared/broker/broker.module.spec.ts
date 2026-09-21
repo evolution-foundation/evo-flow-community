@@ -8,6 +8,7 @@ import {
 import { KafkaBrokerAdapter } from './adapters/kafka-broker.adapter';
 import { RabbitMQBrokerAdapter } from './adapters/rabbitmq-broker.adapter';
 import { BrokerConfigError } from './errors/broker-config.error';
+import { ContextPropagatingBroker } from './context-propagating.broker';
 
 function compileBrokerModule(brokerType: string | undefined) {
   const env: Record<string, string> = {};
@@ -45,7 +46,10 @@ describe('BrokerModule', () => {
     const moduleRef = await compileBrokerModule('kafka');
     const broker = moduleRef.get<IMessageBroker>(IMESSAGE_BROKER);
 
-    expect(broker).toBeInstanceOf(KafkaBrokerAdapter);
+    expect(broker).toBeInstanceOf(ContextPropagatingBroker);
+    expect((broker as ContextPropagatingBroker).adapter).toBeInstanceOf(
+      KafkaBrokerAdapter,
+    );
 
     await moduleRef.close();
   });
@@ -54,7 +58,10 @@ describe('BrokerModule', () => {
     const moduleRef = await compileBrokerModule('rabbitmq');
     const broker = moduleRef.get<IMessageBroker>(IMESSAGE_BROKER);
 
-    expect(broker).toBeInstanceOf(RabbitMQBrokerAdapter);
+    expect(broker).toBeInstanceOf(ContextPropagatingBroker);
+    expect((broker as ContextPropagatingBroker).adapter).toBeInstanceOf(
+      RabbitMQBrokerAdapter,
+    );
 
     await moduleRef.close();
   });

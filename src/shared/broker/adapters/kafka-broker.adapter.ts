@@ -140,7 +140,11 @@ export class KafkaBrokerAdapter
     this.active = false;
   }
 
-  async publish<T>(topic: string, payload: T): Promise<void> {
+  async publish<T>(
+    topic: string,
+    payload: T,
+    headers: Record<string, string> = {},
+  ): Promise<void> {
     this.assertActive('publish');
 
     await this.ensureTopicExists(topic);
@@ -155,6 +159,7 @@ export class KafkaBrokerAdapter
         {
           value,
           headers: {
+            ...headers,
             correlationId,
             messageId,
             'content-type': 'application/json',

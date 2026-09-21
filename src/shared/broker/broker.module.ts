@@ -9,6 +9,7 @@ import { BrokerConfigError } from './errors/broker-config.error';
 import { KafkaBrokerAdapter } from './adapters/kafka-broker.adapter';
 import { RabbitMQBrokerAdapter } from './adapters/rabbitmq-broker.adapter';
 import { BrokerMetrics } from './metrics/broker-metrics';
+import { ContextPropagatingBroker } from './context-propagating.broker';
 
 const brokerProvider: Provider = {
   provide: IMESSAGE_BROKER,
@@ -35,9 +36,9 @@ const brokerProvider: Provider = {
 
     switch (rawValue as BrokerType) {
       case BrokerType.KAFKA:
-        return kafka;
+        return new ContextPropagatingBroker(kafka);
       case BrokerType.RABBITMQ:
-        return rabbit;
+        return new ContextPropagatingBroker(rabbit);
       default: {
         const _exhaustive: never = rawValue as never;
         throw new BrokerConfigError(

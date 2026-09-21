@@ -80,7 +80,6 @@ const ALLOWLIST = new Map([
   // Temporal activities/nodes/utils — full payload→activity tenant propagation is
   // staged; one reference site (updateExecutionProgress) already uses the seam.
   ['src/modules/temporal/activities/journey-execution.activities.ts', 'Temporal propagation staged'],
-  ['src/modules/temporal/activities/campaign-execution.activities.ts', 'Temporal propagation staged'],
   ['src/modules/temporal/activities/campaign-message-sending.activities.ts', 'Temporal propagation staged'],
   ['src/modules/temporal/activities/action-nodes.activities.ts', 'Temporal propagation staged'],
   ['src/modules/temporal/activities/wait.activities.ts', 'Temporal propagation staged'],
@@ -97,7 +96,7 @@ const ALLOWLIST = new Map([
  * allowlisted in. Lower the ceiling whenever an entry is removed; raising it
  * requires a deliberate, justified edit in the PR.
  */
-const ALLOWLIST_CEILING = 23;
+const ALLOWLIST_CEILING = 22;
 if (ALLOWLIST.size > ALLOWLIST_CEILING) {
   console.error(
     `\n✖ tenant-db-context guard: ALLOWLIST grew to ${ALLOWLIST.size} entries ` +

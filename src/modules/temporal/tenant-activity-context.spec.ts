@@ -4,7 +4,11 @@ jest.mock('../../database/ormconfig', () => ({
 }));
 
 import { EntityManager } from 'typeorm';
-import { EvoExtensionPoints } from '../../evo-extension-points';
+import { ClsServiceManager } from 'nestjs-cls';
+import {
+  EvoExtensionPoints,
+  TENANT_DB_MANAGER_CLS_KEY,
+} from '../../evo-extension-points';
 import { runActivityInTenantDbContext } from './tenant-activity-context';
 
 /**
@@ -36,6 +40,20 @@ describe('runActivityInTenantDbContext', () => {
 
     expect(seen.tenantId).toBe('tenant-B');
     expect(got).toEqual({ tag: 'scoped' });
+  });
+
+  it('runs on the manager already bound in CLS when the payload has no tenant', async () => {
+    const impl = jest.fn();
+    EvoExtensionPoints.replace('tenant_db_context', impl);
+    const cls = ClsServiceManager.getClsService();
+
+    const got = await cls.run(() => {
+      cls.set(TENANT_DB_MANAGER_CLS_KEY, { tag: 'bound' });
+      return runActivityInTenantDbContext(undefined, (m) => Promise.resolve(m));
+    });
+
+    expect(got).toEqual({ tag: 'bound' });
+    expect(impl).not.toHaveBeenCalled();
   });
 
   it('propagates an explicit failure (missing tenant under multi-tenant) instead of leaking', async () => {

@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Connection, Client } from '@temporalio/client';
 import { ConfigService } from '@nestjs/config';
+import { DataSource } from 'typeorm';
+import { EvoExtensionPoints } from '../../../evo-extension-points/registry';
 
 export interface ScheduleCampaignWorkflowInput {
   campaignId: string;
@@ -30,7 +32,10 @@ export class CampaignWorkflowService {
   private client: Client | null = null;
   private connection: Connection | null = null;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly dataSource: DataSource,
+  ) {}
 
   /**
    * Get or create Temporal client connection
@@ -56,6 +61,9 @@ export class CampaignWorkflowService {
       this.client = new Client({
         connection: this.connection,
         namespace: 'default',
+        interceptors: EvoExtensionPoints.get('temporal_interceptors')(
+          this.dataSource,
+        ).client,
       });
 
       this.logger.log('Successfully connected to Temporal');

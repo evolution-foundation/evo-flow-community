@@ -157,7 +157,11 @@ export class RabbitMQBrokerAdapter
     this.channel = null;
   }
 
-  async publish<T>(topic: string, payload: T): Promise<void> {
+  async publish<T>(
+    topic: string,
+    payload: T,
+    headers: Record<string, string> = {},
+  ): Promise<void> {
     this.assertActive('publish');
 
     const { exchange, routingKey } = this.resolveExchange(topic);
@@ -173,6 +177,7 @@ export class RabbitMQBrokerAdapter
       messageId,
       correlationId,
       headers: {
+        ...headers,
         correlationId,
         messageId,
         'content-type': 'application/json',

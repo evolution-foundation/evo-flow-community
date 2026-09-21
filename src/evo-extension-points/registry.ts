@@ -1,6 +1,8 @@
 import type { Request } from 'express';
 import type { DynamicModule } from '@nestjs/common';
 import type { DataSource, EntityManager } from 'typeorm';
+import type { ClientInterceptors } from '@temporalio/client';
+import type { WorkerInterceptors } from '@temporalio/worker';
 import { ExtensionPointName } from './version';
 
 export type CapabilityGateImpl = (
@@ -76,6 +78,37 @@ export type TenantDbContextImpl = <T>(
  */
 export type CacheKeyScopeImpl = () => string;
 
+/**
+ * Opaque headers stamped on everything the process sends out: broker publishes
+ * and calls to the CRM. The runtime never reads the map; callers' own headers
+ * win on a key clash. Community default returns `{}`.
+ */
+export type OutboundHeadersImpl = () => Record<string, string>;
+
+/**
+ * Wraps the processing of one inbound broker message, given the headers it was
+ * published with. Community default just runs `work`.
+ */
+export type InboundMessageContextImpl = <T>(
+  headers: Record<string, string>,
+  work: () => Promise<T>,
+) => Promise<T>;
+
+export interface TemporalInterceptorSet {
+  client?: ClientInterceptors;
+  worker?: Pick<WorkerInterceptors, 'activity' | 'workflowModules'>;
+}
+
+/**
+ * Temporal interceptors for the campaign client and worker. Workflow
+ * interceptors run inside the workflow sandbox, so they are handed over as
+ * module paths (`worker.workflowModules`), not objects. Community default
+ * returns `{}`.
+ */
+export type TemporalInterceptorsImpl = (
+  dataSource: DataSource,
+) => TemporalInterceptorSet;
+
 export interface ExtensionPointImplementations {
   capability_gate: CapabilityGateImpl;
   runtime_context: RuntimeContextImpl;
@@ -83,6 +116,9 @@ export interface ExtensionPointImplementations {
   theme_tokens: ThemeTokensImpl;
   tenant_db_context: TenantDbContextImpl;
   cache_key_scope: CacheKeyScopeImpl;
+  outbound_headers: OutboundHeadersImpl;
+  inbound_message_context: InboundMessageContextImpl;
+  temporal_interceptors: TemporalInterceptorsImpl;
 }
 
 const defaultCapabilityGate: CapabilityGateImpl = () => true;
@@ -106,6 +142,15 @@ const defaultTenantDbContext: TenantDbContextImpl = (
 // parity). An enterprise overlay returns a request-bound suffix.
 const defaultCacheKeyScope: CacheKeyScopeImpl = () => '';
 
+const defaultOutboundHeaders: OutboundHeadersImpl = () => ({});
+
+const defaultInboundMessageContext: InboundMessageContextImpl = (
+  _headers,
+  work,
+) => work();
+
+const defaultTemporalInterceptors: TemporalInterceptorsImpl = () => ({});
+
 class ExtensionPointRegistry {
   private readonly implementations: ExtensionPointImplementations = {
     capability_gate: defaultCapabilityGate,
@@ -114,6 +159,9 @@ class ExtensionPointRegistry {
     theme_tokens: defaultThemeTokens,
     tenant_db_context: defaultTenantDbContext,
     cache_key_scope: defaultCacheKeyScope,
+    outbound_headers: defaultOutboundHeaders,
+    inbound_message_context: defaultInboundMessageContext,
+    temporal_interceptors: defaultTemporalInterceptors,
   };
 
   replace<K extends ExtensionPointName>(
@@ -142,6 +190,9 @@ class ExtensionPointRegistry {
     this.implementations.theme_tokens = defaultThemeTokens;
     this.implementations.tenant_db_context = defaultTenantDbContext;
     this.implementations.cache_key_scope = defaultCacheKeyScope;
+    this.implementations.outbound_headers = defaultOutboundHeaders;
+    this.implementations.inbound_message_context = defaultInboundMessageContext;
+    this.implementations.temporal_interceptors = defaultTemporalInterceptors;
   }
 }
 

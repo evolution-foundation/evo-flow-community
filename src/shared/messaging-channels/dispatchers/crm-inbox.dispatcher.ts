@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EvoExtensionPoints } from '../../../evo-extension-points/registry';
 import {
   ChannelDispatchInput,
   DispatchResult,
@@ -188,6 +189,7 @@ export class CrmInboxDispatcher implements IChannelDispatcher {
 
   private getHeaders(): Record<string, string> {
     return {
+      ...EvoExtensionPoints.get('outbound_headers')(),
       'Content-Type': 'application/json',
       'X-Service-Token': this.serviceToken,
       'User-Agent': 'EvoAI-Campaign/1.0',
