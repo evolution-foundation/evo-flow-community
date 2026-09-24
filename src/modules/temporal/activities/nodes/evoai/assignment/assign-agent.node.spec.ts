@@ -1,3 +1,7 @@
+// The node builds CrmClientService in its constructor, which throws without a token.
+process.env.EVOAI_CRM_API_TOKEN ||= 'test-token';
+process.env.EVOAI_CRM_BASE_URL ||= 'http://crm-test.local';
+
 import { AssignAgentNode } from './assign-agent.node';
 
 describe('AssignAgentNode', () => {

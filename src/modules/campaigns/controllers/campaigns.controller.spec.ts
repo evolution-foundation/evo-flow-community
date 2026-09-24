@@ -95,7 +95,7 @@ describe('CampaignsController critical execution flows', () => {
     const { controller, campaignsService } = buildController();
 
     const result = await controller.stop(campaignId);
-    expect(campaignsService.stop).toHaveBeenCalledWith(campaignId, accountId);
+    expect(campaignsService.stop).toHaveBeenCalledWith(campaignId);
     expect(result).toEqual({ id: campaignId, status: 'stopped' });
   });
 });
