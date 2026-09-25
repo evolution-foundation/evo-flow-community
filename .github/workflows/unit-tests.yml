@@ -10,6 +10,10 @@ on:
   push:
     branches: [main, develop]
 
+# npm ci runs third-party install scripts; the token they could reach stays read-only.
+permissions:
+  contents: read
+
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
