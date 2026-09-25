@@ -19,7 +19,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
       - name: Install dependencies
         run: npm ci
+      # Pinned: on a 2-vCPU runner jest falls back to in-band, where open handles
+      # keep it from exiting for ~5 min after the run finishes.
       - name: Run the full suite
-        run: npx jest --ci
+        run: npx jest --ci --maxWorkers=2
