@@ -64,6 +64,35 @@ describe('EventSchemaValidationPipe', () => {
     });
   });
 
+  describe('scheduled_action.failed', () => {
+    const failed = {
+      messageId: 'sa-1-failed-1',
+      contactId: '550e8400-e29b-41d4-a716-446655440001',
+      event: 'scheduled_action.failed',
+      properties: {
+        scheduled_action_id: 42,
+        action_type: 'execute_webhook',
+        scheduled_for: '2026-10-06T14:00:00Z',
+        source: 'scheduled_action',
+        error_message: 'Webhook failed with status 500',
+        retry_count: 1,
+        will_retry: true,
+      },
+    };
+
+    it('accepts the CRM payload with a numeric action id', () => {
+      expect(pipe.transform(failed, bodyMetadata)).toBe(failed);
+    });
+
+    it('rejects a payload without scheduled_for', () => {
+      const rest: Record<string, unknown> = { ...failed.properties };
+      delete rest.scheduled_for;
+      expect(() =>
+        pipe.transform({ ...failed, properties: rest }, bodyMetadata),
+      ).toThrow(BadRequestException);
+    });
+  });
+
   describe('AC3 — required field validation (track path)', () => {
     it('rejects message.delivered without message_id with MissingRequiredField', () => {
       const value = {
