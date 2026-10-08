@@ -29,6 +29,7 @@ type ServiceInternals = {
     tableName: string,
     expectedBrokers: string,
     dependentViews?: string[],
+    expectedGroup?: string,
   ): Promise<boolean>;
   extractKafkaBrokers(createTableQuery: string): string | null;
   query: jest.Mock;
@@ -147,6 +148,7 @@ describe('ClickHouseService — contact-events broker guard (EVO-1925)', () => {
         'contact_events_kafka_queue',
         'evo-campaign-kafka:29092',
         ['contact_events_kafka_mv'],
+        'evo-campaign-consumers-clickhouse',
       );
 
       // Guard must run before the CREATE TABLE command for the Kafka queue.

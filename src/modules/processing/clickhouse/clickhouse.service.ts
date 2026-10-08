@@ -337,9 +337,9 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
    * broker string from the first boot. If that boot lacked KAFKA_BROKERS_INTERNAL
    * the table is stuck on 'localhost:9092' forever — ClickHouse can't reach Kafka
    * and the topic silently receives nothing (EVO-1893/EVO-1925). This reads the
-   * existing DDL, and if the broker diverges from `expectedBrokers`, drops the
-   * dependent materialized views and the Kafka table so the caller can recreate
-   * them with the right broker.
+   * existing DDL, and if the broker diverges from `expectedBrokers` (or the
+   * consumer group from `expectedGroup`, when given), drops the dependent
+   * materialized views and the Kafka table so the caller can recreate them.
    *
    * @returns true if the table was dropped (stale), false if absent or already correct.
    */
@@ -348,6 +348,7 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
     tableName: string,
     expectedBrokers: string,
     dependentViews: string[] = [],
+    expectedGroup?: string,
   ): Promise<boolean> {
     try {
       const rows = await this.query<{ engine: string; create: string }>({
@@ -372,19 +373,32 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
       }
 
       const currentBrokers = this.extractKafkaBrokers(existing.create);
+      const currentGroup = this.extractKafkaGroup(existing.create);
+      const staleBroker = currentBrokers !== expectedBrokers;
+      const staleGroup =
+        expectedGroup !== undefined && currentGroup !== expectedGroup;
 
-      if (currentBrokers === expectedBrokers) {
+      if (!staleBroker && !staleGroup) {
         this.logger.log(
-          `Kafka Engine table '${databaseName}.${tableName}' already points at the configured broker ('${expectedBrokers}')`,
+          `Kafka Engine table '${databaseName}.${tableName}' already points at the configured broker ('${expectedBrokers}')` +
+            (expectedGroup ? ` and group ('${expectedGroup}')` : ''),
         );
         return false;
       }
 
-      this.logger.warn(
-        `⚠️ Kafka Engine table '${databaseName}.${tableName}' is bound to a stale broker ` +
-          `('${currentBrokers ?? 'unknown'}') but the configured broker is '${expectedBrokers}'. ` +
-          `Recreating it so the pipeline reaches Kafka (EVO-1893/EVO-1925).`,
-      );
+      if (staleBroker) {
+        this.logger.warn(
+          `⚠️ Kafka Engine table '${databaseName}.${tableName}' is bound to a stale broker ` +
+            `('${currentBrokers ?? 'unknown'}') but the configured broker is '${expectedBrokers}'. ` +
+            `Recreating it so the pipeline reaches Kafka (EVO-1893/EVO-1925).`,
+        );
+      }
+      if (staleGroup) {
+        this.logger.warn(
+          `⚠️ Kafka Engine table '${databaseName}.${tableName}' uses consumer group ` +
+            `'${currentGroup ?? 'unknown'}' but the configured group is '${expectedGroup}'. Recreating it.`,
+        );
+      }
 
       // Drop dependent materialized views first (they block dropping the source).
       for (const view of dependentViews) {
@@ -418,6 +432,16 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
    */
   private extractKafkaBrokers(createTableQuery: string): string | null {
     const match = createTableQuery.match(/Kafka\(\s*'([^']*)'/i);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * Extract the consumer group (third argument) from a Kafka Engine DDL.
+   */
+  private extractKafkaGroup(createTableQuery: string): string | null {
+    const match = createTableQuery.match(
+      /Kafka\(\s*'[^']*'\s*,\s*'[^']*'\s*,\s*'([^']*)'/i,
+    );
     return match ? match[1] : null;
   }
 
@@ -486,6 +510,7 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
         // The MV reads from the Kafka queue and writes into the main table; it
         // must be dropped before the underlying Kafka table can be dropped.
         [`${tableName}_kafka_mv`],
+        kafkaGroupId,
       );
 
       // 1. Create Kafka queue table
@@ -930,7 +955,10 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
 
       const kafkaBrokers = this.config.kafka?.brokersInternal || 'kafka:29092';
       const kafkaTopic = 'journey-triggers';
-      const kafkaGroupId = 'temporal-workers';
+      // ClickHouse only produces into this topic, but the table still names a
+      // consumer group: never the journey workers' own 'temporal-workers', or a
+      // consumer started on it would split their partitions and drop triggers.
+      const kafkaGroupId = `${this.config.kafka?.groupId || 'evo-campaign-consumers'}-journey-triggers-clickhouse`;
 
       this.logger.log(
         `Using Kafka brokers for Journey Triggers: ${kafkaBrokers}`,
@@ -949,6 +977,7 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
         // The MV reads from contact_events and writes into the queue table; it
         // must be dropped before the underlying Kafka table can be dropped.
         ['events_to_journey_triggers_mv'],
+        kafkaGroupId,
       );
 
       // 1. Create Kafka table for journey triggers
