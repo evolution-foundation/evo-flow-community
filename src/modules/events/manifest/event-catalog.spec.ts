@@ -57,6 +57,26 @@ describe('events manifest catalog', () => {
     ]);
   });
 
+  it('exposes the scheduled action outcomes as track events in their own category', () => {
+    const executed = getEvent('scheduled_action.executed');
+    const failed = getEvent('scheduled_action.failed');
+    for (const entry of [executed, failed]) {
+      expect(entry?.category).toBe('scheduled_action');
+      expect(entry?.dtoType).toBe('track');
+      expect(Object.keys(entry!.schema.required).sort()).toEqual([
+        'action_type',
+        'scheduled_action_id',
+        'scheduled_for',
+        'source',
+      ]);
+    }
+    expect(failed?.schema.optional.error_message.type).toBe('string');
+    expect(failed?.schema.optional.will_retry.type).toBe('boolean');
+    expect(
+      getEventsByCategory('scheduled_action').map((e) => e.eventName),
+    ).toEqual(['scheduled_action.executed', 'scheduled_action.failed']);
+  });
+
   it('returns undefined for an unknown event name', () => {
     expect(getEvent('not.a.real.event')).toBeUndefined();
   });
