@@ -18,9 +18,13 @@ export class DeletedContactsCacheService {
   private readonly CACHE_TTL = 300000; // 5 minutes
   // Ingest → Kafka → ClickHouse MV is async: a fetch right after the deleted-contact
   // signal may not see the row yet and would re-cache a stale set for CACHE_TTL. During
-  // this window every call queries ClickHouse and nothing is cached (CRM-215).
+  // this window the cache is never served.
   private readonly BYPASS_AFTER_DELETE_MS = 15000;
   private bypassCacheUntil = 0;
+  // Concurrent callers share one ClickHouse fetch. Each invalidation bumps the
+  // generation, so a fetch that started before it never re-caches the old set.
+  private inFlight: Promise<Set<string>> | null = null;
+  private generation = 0;
 
   constructor(private readonly clickhouseService: ClickHouseService) {}
 
@@ -33,14 +37,37 @@ export class DeletedContactsCacheService {
       return this.cached;
     }
 
+    if (this.inFlight) {
+      return this.inFlight;
+    }
+
     this.logger.debug('Deleted contacts cache miss, fetching from ClickHouse');
 
+    const pending = this.loadDeletedContacts(this.generation, now).finally(
+      () => {
+        if (this.inFlight === pending) this.inFlight = null;
+      },
+    );
+    this.inFlight = pending;
+    return pending;
+  }
+
+  private async loadDeletedContacts(
+    generation: number,
+    startedAt: number,
+  ): Promise<Set<string>> {
     try {
       const deletedContacts = await this.fetchDeletedContactsFromClickHouse();
-      this.cached = deletedContacts;
-      // A set fetched inside the bypass window may be incomplete: let it expire with the window.
-      this.expiresAt = bypass ? this.bypassCacheUntil : now + this.CACHE_TTL;
-      this.logger.debug(`Cached ${deletedContacts.size} deleted contacts`);
+      if (generation === this.generation) {
+        this.cached = deletedContacts;
+        // A set fetched inside the bypass window may be incomplete: let it expire with the
+        // window. Judged by when the fetch started, not when it returned.
+        this.expiresAt =
+          startedAt < this.bypassCacheUntil
+            ? this.bypassCacheUntil
+            : startedAt + this.CACHE_TTL;
+        this.logger.debug(`Cached ${deletedContacts.size} deleted contacts`);
+      }
       return deletedContacts;
     } catch (error) {
       this.logger.error('Failed to fetch deleted contacts:', error);
@@ -74,6 +101,8 @@ export class DeletedContactsCacheService {
   }
 
   invalidateCache(): void {
+    this.generation += 1;
+    this.inFlight = null;
     this.cached = null;
     this.expiresAt = 0;
     this.logger.debug('Deleted contacts cache invalidated');

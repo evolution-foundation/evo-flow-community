@@ -11,6 +11,7 @@ import { SegmentQueryExecutionService } from './services/segment-query-execution
 import { SegmentAssignmentService } from './services/segment-assignment.service';
 import { SegmentEventsService } from './services/segment-events.service';
 import { DeletedContactsCacheService } from './services/deleted-contacts-cache.service';
+import { DeletedContactsSignalRelay } from './services/deleted-contacts-signal.relay';
 import { SegmentCircuitBreakerService } from './services/segment-circuit-breaker.service';
 import { SegmentMetricsService } from './metrics/segment-metrics.service';
 import { SegmentQueueService } from './services/segment-queue.service';
@@ -38,6 +39,7 @@ import { ProcessingModule } from '../processing/processing.module';
     SegmentAssignmentService,
     SegmentEventsService,
     DeletedContactsCacheService,
+    DeletedContactsSignalRelay,
     SegmentCircuitBreakerService,
     SegmentMetricsService,
     SegmentQueueService,
