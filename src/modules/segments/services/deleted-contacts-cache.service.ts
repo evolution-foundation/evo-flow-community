@@ -43,24 +43,29 @@ export class DeletedContactsCacheService {
 
     this.logger.debug('Deleted contacts cache miss, fetching from ClickHouse');
 
-    const pending = this.loadDeletedContacts(this.generation).finally(() => {
-      if (this.inFlight === pending) this.inFlight = null;
-    });
+    const pending = this.loadDeletedContacts(this.generation, now).finally(
+      () => {
+        if (this.inFlight === pending) this.inFlight = null;
+      },
+    );
     this.inFlight = pending;
     return pending;
   }
 
-  private async loadDeletedContacts(generation: number): Promise<Set<string>> {
+  private async loadDeletedContacts(
+    generation: number,
+    startedAt: number,
+  ): Promise<Set<string>> {
     try {
       const deletedContacts = await this.fetchDeletedContactsFromClickHouse();
       if (generation === this.generation) {
-        const now = Date.now();
         this.cached = deletedContacts;
-        // A set fetched inside the bypass window may be incomplete: let it expire with the window.
+        // A set fetched inside the bypass window may be incomplete: let it expire with the
+        // window. Judged by when the fetch started, not when it returned.
         this.expiresAt =
-          now < this.bypassCacheUntil
+          startedAt < this.bypassCacheUntil
             ? this.bypassCacheUntil
-            : now + this.CACHE_TTL;
+            : startedAt + this.CACHE_TTL;
         this.logger.debug(`Cached ${deletedContacts.size} deleted contacts`);
       }
       return deletedContacts;
