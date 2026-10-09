@@ -251,4 +251,74 @@ describe('CRM-215 deleted-contacts cache never trades correctness for speed', ()
 
     expect((cache as any).cached).toBeNull();
   });
+
+  describe('concurrent fetches', () => {
+    function deferredFetches(cache: DeletedContactsCacheService) {
+      const pending: Array<(set: Set<string>) => void> = [];
+      const fetch = jest.fn(
+        () => new Promise<Set<string>>((resolve) => pending.push(resolve)),
+      );
+      (cache as any).fetchDeletedContactsFromClickHouse = fetch;
+      return { fetch, pending };
+    }
+
+    it('shares one ClickHouse query among concurrent calls inside the bypass window', async () => {
+      const cache = new DeletedContactsCacheService({} as any);
+      const { fetch, pending } = deferredFetches(cache);
+      cache.onContactDeletedIngested();
+
+      const calls = Array.from({ length: 5 }, () => cache.getDeletedContacts());
+      pending[0](new Set(['gone']));
+      const results = await Promise.all(calls);
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      results.forEach((set) => expect(set).toEqual(new Set(['gone'])));
+    });
+
+    it('shares one query among concurrent cache misses outside the window too', async () => {
+      const cache = new DeletedContactsCacheService({} as any);
+      const { fetch, pending } = deferredFetches(cache);
+
+      const calls = [cache.getDeletedContacts(), cache.getDeletedContacts()];
+      pending[0](new Set(['gone']));
+      await Promise.all(calls);
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(await cache.getDeletedContacts()).toEqual(new Set(['gone'])); // cache hit
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not re-cache a set fetched before the deletion signal arrived', async () => {
+      const cache = new DeletedContactsCacheService({} as any);
+      const { fetch, pending } = deferredFetches(cache);
+
+      const beforeSignal = cache.getDeletedContacts();
+      cache.onContactDeletedIngested();
+      const afterSignal = cache.getDeletedContacts();
+
+      expect(fetch).toHaveBeenCalledTimes(2); // the old fetch is not shared after the signal
+      pending[0](new Set(['stale']));
+      expect(await beforeSignal).toEqual(new Set(['stale']));
+      expect((cache as any).cached).toBeNull();
+
+      pending[1](new Set(['stale', 'fresh']));
+      expect(await afterSignal).toEqual(new Set(['stale', 'fresh']));
+      expect((cache as any).cached).toEqual(new Set(['stale', 'fresh']));
+    });
+
+    it('starts a new query once the shared one settles', async () => {
+      const cache = new DeletedContactsCacheService({} as any);
+      const { fetch, pending } = deferredFetches(cache);
+      cache.onContactDeletedIngested();
+
+      const first = cache.getDeletedContacts();
+      pending[0](new Set(['a']));
+      await first;
+      const second = cache.getDeletedContacts(); // still inside the window: no cache hit
+      pending[1](new Set(['a', 'b']));
+
+      expect(await second).toEqual(new Set(['a', 'b']));
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
+  });
 });
