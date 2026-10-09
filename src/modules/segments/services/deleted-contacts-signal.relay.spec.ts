@@ -1,4 +1,6 @@
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Test } from '@nestjs/testing';
+import { EventEmitter2, EventEmitterModule } from '@nestjs/event-emitter';
+import { ClickHouseService } from '../../processing/clickhouse/clickhouse.service';
 import { CONTACT_DELETED_INGESTED_EVENT } from '../queries/contact-event-names';
 import { DeletedContactsCacheService } from './deleted-contacts-cache.service';
 import { DeletedContactsSignalRelay } from './deleted-contacts-signal.relay';
@@ -44,7 +46,7 @@ class FakeRedis {
     return Promise.resolve(bus.subscribers.size);
   });
 
-  quit = jest.fn(() => Promise.resolve('OK'));
+  disconnect = jest.fn();
 }
 
 jest.mock('ioredis', () => ({
@@ -169,13 +171,65 @@ describe('DeletedContactsSignalRelay', () => {
     ]);
   });
 
-  it('closes both connections on shutdown', async () => {
+  it('closes both connections on shutdown, without waiting on a Redis that may be down', () => {
     const worker = bootProcess();
     const { publisher, subscriber } = worker.relay as any;
 
-    await worker.relay.onModuleDestroy();
+    worker.relay.onModuleDestroy();
 
-    expect((publisher as FakeRedis).quit).toHaveBeenCalled();
-    expect((subscriber as FakeRedis).quit).toHaveBeenCalled();
+    expect((publisher as FakeRedis).disconnect).toHaveBeenCalled();
+    expect((subscriber as FakeRedis).disconnect).toHaveBeenCalled();
+  });
+
+  it('logs one error per outage, not one per reconnect attempt', () => {
+    const worker = bootProcess();
+    const subscriber = (worker.relay as any).subscriber as FakeRedis;
+    const logError = jest.spyOn((worker.relay as any).logger, 'error');
+
+    subscriber.emit('error', new Error('ECONNREFUSED'));
+    subscriber.emit('error', new Error('ECONNREFUSED'));
+    subscriber.emit('error', new Error('ECONNREFUSED'));
+    expect(logError).toHaveBeenCalledTimes(1);
+
+    subscriber.emit('ready');
+    subscriber.emit('error', new Error('ECONNREFUSED'));
+    expect(logError).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('DeletedContactsSignalRelay wired by Nest', () => {
+  beforeEach(() => bus.subscribers.clear());
+
+  it('the real @OnEvent publishes a local deletion once and never a relayed one', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [EventEmitterModule.forRoot()],
+      providers: [
+        DeletedContactsSignalRelay,
+        DeletedContactsCacheService,
+        { provide: ClickHouseService, useValue: {} },
+      ],
+    }).compile();
+    await moduleRef.init();
+
+    const emitter = moduleRef.get(EventEmitter2);
+    const relay = moduleRef.get(DeletedContactsSignalRelay);
+    const cache = moduleRef.get(DeletedContactsCacheService);
+    const publisher = (relay as any).publisher as FakeRedis;
+    (cache as any).cached = new Set(['stale']);
+
+    emitter.emit(CONTACT_DELETED_INGESTED_EVENT, { contactId: 'c-1' });
+    emitter.emit(CONTACT_DELETED_INGESTED_EVENT, {
+      contactId: 'c-2',
+      relayed: true,
+    });
+    await flush();
+
+    expect(publisher.publish).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(publisher.publish.mock.calls[0][1])).toMatchObject({
+      contactId: 'c-1',
+    });
+    expect((cache as any).cached).toBeNull();
+
+    await moduleRef.close();
   });
 });
