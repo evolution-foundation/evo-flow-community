@@ -20,7 +20,7 @@ interface RelayMessage {
  * Carries the deleted-contact signal across processes. The ingest that emits it runs
  * in the api process, while segments are recomputed by the segment-worker: without this
  * relay the worker's DeletedContactsCacheService keeps a stale set until its TTL.
- * Best effort: if Redis is down the caches fall back to that TTL, as before.
+ * Best effort: if Redis is down the caches fall back to that TTL.
  */
 @Injectable()
 export class DeletedContactsSignalRelay

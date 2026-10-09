@@ -18,7 +18,7 @@ export class DeletedContactsCacheService {
   private readonly CACHE_TTL = 300000; // 5 minutes
   // Ingest → Kafka → ClickHouse MV is async: a fetch right after the deleted-contact
   // signal may not see the row yet and would re-cache a stale set for CACHE_TTL. During
-  // this window every call queries ClickHouse and nothing is cached (CRM-215).
+  // this window the cache is never served.
   private readonly BYPASS_AFTER_DELETE_MS = 15000;
   private bypassCacheUntil = 0;
   // Concurrent callers share one ClickHouse fetch. Each invalidation bumps the
