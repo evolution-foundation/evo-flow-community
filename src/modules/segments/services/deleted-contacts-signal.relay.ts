@@ -70,10 +70,12 @@ export class DeletedContactsSignalRelay
     }
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await Promise.allSettled(
-      [this.subscriber, this.publisher].map((client) => client?.quit()),
-    );
+  // disconnect(), not quit(): with Redis down, quit() rejects and the client keeps
+  // reconnecting, leaving an open handle behind.
+  onModuleDestroy(): void {
+    for (const client of [this.subscriber, this.publisher]) {
+      client?.disconnect();
+    }
   }
 
   @OnEvent(CONTACT_DELETED_INGESTED_EVENT)
@@ -126,9 +128,17 @@ export class DeletedContactsSignalRelay
       connectTimeout: 10000,
       ...options,
     });
-    client.on('error', (error) =>
-      this.logger.error(`Deleted-contact signal Redis error: ${error.message}`),
-    );
+    // One line per outage, not one per reconnect attempt.
+    let down = false;
+    client.on('error', (error) => {
+      if (down) return;
+      down = true;
+      this.logger.error(`Deleted-contact signal Redis error: ${error.message}`);
+    });
+    client.on('ready', () => {
+      if (down) this.logger.log('Deleted-contact signal Redis connection back');
+      down = false;
+    });
     return client;
   }
 }
