@@ -479,6 +479,50 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * The view is created with `IF NOT EXISTS`, so one created by an older boot
+   * keeps parsing the timestamps with parseDateTimeBestEffort, which drops the
+   * milliseconds and lets events of the same second tie. Drop it so the
+   * current definition is created; the Kafka table holds the offsets meanwhile.
+   */
+  private async ensureContactEventsViewKeepsMilliseconds(
+    databaseName: string,
+    viewName: string,
+  ): Promise<boolean> {
+    try {
+      const rows = await this.query<{ create: string }>({
+        query: `
+          SELECT create_table_query AS create
+          FROM system.tables
+          WHERE database = {database:String} AND name = {table:String}
+        `,
+        parameters: { database: databaseName, table: viewName },
+      });
+
+      const existing = rows?.[0];
+      const keepsMilliseconds = ['occurred_at', 'processing_time'].every(
+        (column) =>
+          existing?.create.includes(`parseDateTime64BestEffort(${column}, 3)`),
+      );
+      if (!existing || keepsMilliseconds) {
+        return false;
+      }
+
+      await this.command({
+        query: `DROP VIEW IF EXISTS ${databaseName}.${viewName}`,
+      });
+      this.logger.warn(
+        `Dropped '${databaseName}.${viewName}', which truncated event timestamps to seconds; recreating it`,
+      );
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `Could not check the timestamp precision of '${databaseName}.${viewName}': ${error.message}`,
+      );
+      return false;
+    }
+  }
+
+  /**
    * Create Kafka integration tables
    * This creates a Kafka Engine table that reads from Kafka
    * and a Materialized View that moves data to the main table
@@ -511,6 +555,11 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
         // must be dropped before the underlying Kafka table can be dropped.
         [`${tableName}_kafka_mv`],
         kafkaGroupId,
+      );
+
+      await this.ensureContactEventsViewKeepsMilliseconds(
+        databaseName,
+        `${tableName}_kafka_mv`,
       );
 
       // 1. Create Kafka queue table
@@ -556,8 +605,8 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
           traits,
           anonymous_id,
           message_id,
-          parseDateTimeBestEffort(occurred_at) as occurred_at,
-          parseDateTimeBestEffort(processing_time) as processing_time,
+          parseDateTime64BestEffort(occurred_at, 3) as occurred_at,
+          parseDateTime64BestEffort(processing_time, 3) as processing_time,
           message_raw,
           CASE 
             WHEN length(contact_id) > 0 THEN contact_id
