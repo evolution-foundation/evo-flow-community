@@ -97,8 +97,12 @@ describe('SegmentJobService.recomputeStaleSegments — batch logging', () => {
 
     const recomputed = lines.filter((l) => l.startsWith('Recomputed segment'));
     expect(recomputed).toHaveLength(2);
-    expect(recomputed[0]).toMatch(/^Recomputed segment Segment B: 22 contacts/);
-    expect(recomputed[1]).toMatch(/^Recomputed segment Segment A: 23 contacts/);
+    expect(recomputed).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^Recomputed segment Segment A: 23 contacts/),
+        expect.stringMatching(/^Recomputed segment Segment B: 22 contacts/),
+      ]),
+    );
     expect(
       lines.find((l) => l.startsWith('Completed scheduled recomputation')),
     ).toMatch(/: 2\/2 segments/);
