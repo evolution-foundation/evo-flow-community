@@ -44,3 +44,63 @@ describe('SegmentJobService.nodeReferencesEvent — CustomAttribute (EVO-1839)',
     );
   });
 });
+
+describe('SegmentJobService.recomputeStaleSegments — batch logging', () => {
+  const previousRunMode = process.env.RUN_MODE;
+  beforeAll(() => {
+    process.env.RUN_MODE = 'segment-worker';
+  });
+  afterAll(() => {
+    if (previousRunMode === undefined) delete process.env.RUN_MODE;
+    else process.env.RUN_MODE = previousRunMode;
+  });
+
+  const result = (segmentId: string, totalContacts: number) => ({
+    segmentId,
+    contactsAdded: 0,
+    contactsRemoved: 0,
+    totalContacts,
+    processingTimeMs: 1,
+  });
+
+  it('logs each stale segment with its own result, whatever the batch order', async () => {
+    const stale = [
+      { id: 'a', name: 'Segment A' },
+      { id: 'b', name: 'Segment B' },
+    ];
+    const queryBuilder = {
+      where: () => queryBuilder,
+      getMany: () => Promise.resolve(stale),
+    };
+    const segmentRepository = { createQueryBuilder: () => queryBuilder };
+    const segmentComputationService = {
+      computeAllSegments: () =>
+        Promise.resolve([result('c', 7), result('b', 22), result('a', 23)]),
+    };
+    const configService = { get: () => 'segment-worker' };
+    const svc = new SegmentJobService(
+      segmentRepository as never,
+      segmentComputationService as never,
+      configService as never,
+    );
+    const lines: string[] = [];
+    jest
+      .spyOn(
+        (svc as unknown as { logger: { log: (m: string) => void } }).logger,
+        'log',
+      )
+      .mockImplementation((message: string) => {
+        lines.push(message);
+      });
+
+    await svc.recomputeStaleSegments();
+
+    const recomputed = lines.filter((l) => l.startsWith('Recomputed segment'));
+    expect(recomputed).toHaveLength(2);
+    expect(recomputed[0]).toMatch(/^Recomputed segment Segment B: 22 contacts/);
+    expect(recomputed[1]).toMatch(/^Recomputed segment Segment A: 23 contacts/);
+    expect(
+      lines.find((l) => l.startsWith('Completed scheduled recomputation')),
+    ).toMatch(/: 2\/2 segments/);
+  });
+});
