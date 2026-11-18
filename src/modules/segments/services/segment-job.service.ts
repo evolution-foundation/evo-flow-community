@@ -148,8 +148,13 @@ export class SegmentJobService {
           const batchResults =
             await this.segmentComputationService.computeAllSegments();
 
-          batchResults.forEach((result, index) => {
-            const segment = staleSegments[index];
+          // computeAllSegments returns every segment, in its own order.
+          const staleById = new Map(staleSegments.map((s) => [s.id, s]));
+          const staleResults = batchResults.filter((r) =>
+            staleById.has(r.segmentId),
+          );
+          staleResults.forEach((result) => {
+            const segment = staleById.get(result.segmentId);
             if (segment && result.totalContacts > 0) {
               this.logger.log(
                 `Recomputed segment ${segment.name}: ${result.totalContacts} contacts ` +
@@ -158,7 +163,7 @@ export class SegmentJobService {
             }
           });
 
-          results = batchResults;
+          results = staleResults;
         } catch (error) {
           this.logger.error(
             `Batch processing failed, falling back to individual processing: ${error instanceof Error ? error.message : 'Unknown error'}`,
