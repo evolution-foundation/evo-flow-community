@@ -89,6 +89,19 @@ describe('ClickHouseService — contact_events view keeps milliseconds', () => {
     ]);
   });
 
+  it('drops a view that keeps milliseconds for only one column', async () => {
+    internals.query.mockResolvedValue([
+      {
+        create: MILLISECOND_VIEW.replace(
+          'parseDateTime64BestEffort(processing_time, 3)',
+          'parseDateTimeBestEffort(processing_time)',
+        ),
+      },
+    ]);
+
+    await expect(check()).resolves.toBe(true);
+  });
+
   it('keeps a view that already parses milliseconds', async () => {
     internals.query.mockResolvedValue([{ create: MILLISECOND_VIEW }]);
 

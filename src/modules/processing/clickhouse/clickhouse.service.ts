@@ -499,7 +499,11 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
       });
 
       const existing = rows?.[0];
-      if (!existing || existing.create.includes('parseDateTime64BestEffort')) {
+      const keepsMilliseconds = ['occurred_at', 'processing_time'].every(
+        (column) =>
+          existing?.create.includes(`parseDateTime64BestEffort(${column}, 3)`),
+      );
+      if (!existing || keepsMilliseconds) {
         return false;
       }
 
