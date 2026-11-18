@@ -244,14 +244,23 @@ export class SegmentsService {
       throw new NotFoundException(`Segment with ID ${id} not found`);
     }
 
-    await this.segmentRepository.update(
-      { id },
-      {
-        ...updateSegmentDto,
-        lastComputedAt: undefined,
-        definitionUpdatedAt: new Date(),
-      },
-    );
+    // A new definition needs a full rebuild: NULL (TypeORM skips undefined)
+    // makes the next computation read every event, not only newer ones.
+    const changes = Object.fromEntries(
+      Object.entries(updateSegmentDto).filter(([, v]) => v !== undefined),
+    ) as UpdateSegmentDto;
+    if (changes.definition !== undefined) {
+      await this.segmentRepository.update(
+        { id },
+        {
+          ...changes,
+          lastComputedAt: () => 'NULL',
+          definitionUpdatedAt: new Date(),
+        },
+      );
+    } else if (Object.keys(changes).length > 0) {
+      await this.segmentRepository.update({ id }, changes);
+    }
 
     const updatedSegment = await this.segmentRepository.findOne({
       where: { id },

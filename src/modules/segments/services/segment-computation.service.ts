@@ -41,6 +41,41 @@ export class SegmentComputationService {
   }
 
   /**
+   * Stores the computation result and invalidates the cache. The write is
+   * skipped when the definition was edited while computing: the result is for
+   * the old definition, and the edit's NULL last_computed_at must survive so
+   * the next run rebuilds from scratch.
+   */
+  private async recordComputation(
+    segment: Segment,
+    contactsCount: number,
+  ): Promise<void> {
+    const segmentId = segment.id;
+    const query = this.segmentRepository
+      .createQueryBuilder()
+      .update(Segment)
+      .set({ lastComputedAt: new Date(), contactsCount })
+      .where('id = :segmentId', { segmentId });
+    if (segment.definitionUpdatedAt) {
+      query.andWhere(
+        "date_trunc('milliseconds', definition_updated_at) = :loaded",
+        { loaded: segment.definitionUpdatedAt },
+      );
+    } else {
+      query.andWhere('definition_updated_at IS NULL');
+    }
+    const { affected } = await query.execute();
+
+    if (affected === 0) {
+      this.logger.log(
+        `Segment ${segmentId} was edited during computation; result discarded`,
+      );
+    }
+
+    await this.invalidateComputedSegment(segmentId);
+  }
+
+  /**
    * Update segment metadata with cache invalidation (standardized pattern)
    */
   private async updateSegmentWithCacheInvalidation(
@@ -50,6 +85,10 @@ export class SegmentComputationService {
     // Update segment metadata
     await this.segmentRepository.update(segmentId, updateData);
 
+    await this.invalidateComputedSegment(segmentId);
+  }
+
+  private async invalidateComputedSegment(segmentId: string): Promise<void> {
     // Invalidate cache and emit computation event (following standard pattern)
     await this.segmentCacheService.invalidateSegment(segmentId);
     this.eventEmitter.emit('segment.computed', { segmentId });
@@ -95,6 +134,37 @@ export class SegmentComputationService {
     }
 
     return false;
+  }
+
+  /**
+   * A first run or an edited definition rebuilds from every event, so the
+   * previous ClickHouse state must go first. Time-window segments clean up
+   * inside ModularSegmentComputationService, after keeping the old assignments.
+   */
+  private async cleanupBeforeFullRecompute(segment: Segment): Promise<void> {
+    if (this.hasTimeWindows(segment.definition)) {
+      return;
+    }
+
+    const definitionWasUpdated =
+      !!segment.definitionUpdatedAt &&
+      !!segment.lastComputedAt &&
+      segment.definitionUpdatedAt > segment.lastComputedAt;
+    const isFirstComputation = !segment.lastComputedAt;
+
+    if (!definitionWasUpdated && !isFirstComputation) {
+      this.logger.log(
+        `Skipping cleanup for segment ${segment.id} - using incremental processing`,
+      );
+      return;
+    }
+
+    this.logger.log(
+      `Cleaning up old ClickHouse data for segment ${segment.id} (reason: ${
+        definitionWasUpdated ? 'definition updated' : 'first computation'
+      })`,
+    );
+    await this.modularComputationService.cleanupOldSegmentData(segment.id);
   }
 
   async computeSegment(segmentId: string): Promise<SegmentComputationResult> {
@@ -144,42 +214,11 @@ export class SegmentComputationService {
 
     this.logger.log(`Using ClickHouse computation for segment ${segmentId}`);
 
-    const hasTimeWindows = this.hasTimeWindows(segment.definition);
-    const definitionWasUpdated =
-      segment.definitionUpdatedAt &&
-      segment.lastComputedAt &&
-      segment.definitionUpdatedAt > segment.lastComputedAt;
-    const isFirstComputation = !segment.lastComputedAt;
-
-    this.logger.debug(
-      `Segment ${segmentId} analysis: hasTimeWindows=${hasTimeWindows}, ` +
-        `definitionUpdatedAt=${segment.definitionUpdatedAt?.toISOString()}, ` +
-        `lastComputedAt=${segment.lastComputedAt?.toISOString()}, ` +
-        `definitionWasUpdated=${definitionWasUpdated}, isFirstComputation=${isFirstComputation}`,
-    );
-
-    // NOTE: For segments with time windows, cleanup is handled inside ModularSegmentComputationService
-    // after preserving the previous state for event detection
-    if (!hasTimeWindows && (definitionWasUpdated || isFirstComputation)) {
-      this.logger.log(
-        `Cleaning up old ClickHouse data for segment ${segmentId} (reason: ${
-          definitionWasUpdated ? 'definition updated' : 'first computation'
-        })`,
-      );
-      await this.modularComputationService.cleanupOldSegmentData(segment.id);
-    } else if (!hasTimeWindows) {
-      this.logger.log(
-        `Skipping cleanup for segment ${segmentId} - using incremental processing`,
-      );
-    }
+    await this.cleanupBeforeFullRecompute(segment);
 
     const result = await this.modularComputationService.computeSegment(segment);
 
-    // Update segment metadata with cache invalidation
-    await this.updateSegmentWithCacheInvalidation(segment.id, {
-      lastComputedAt: new Date(),
-      contactsCount: result.totalContacts,
-    });
+    await this.recordComputation(segment, result.totalContacts);
 
     return {
       segmentId: result.segmentId,
@@ -201,17 +240,17 @@ export class SegmentComputationService {
         `Using ClickHouse batch computation for ${segments.length} segments`,
       );
 
+      for (const segment of segments) {
+        await this.cleanupBeforeFullRecompute(segment);
+      }
+
       const results =
         await this.modularComputationService.computeSegmentsBatch(segments);
 
-      // Update segment metadata in batch with cache invalidation
       const updatePromises = results.map(async (result) => {
         const segment = segments.find((s) => s.id === result.segmentId);
         if (segment) {
-          await this.updateSegmentWithCacheInvalidation(segment.id, {
-            lastComputedAt: new Date(),
-            contactsCount: result.totalContacts,
-          });
+          await this.recordComputation(segment, result.totalContacts);
         }
 
         return {
