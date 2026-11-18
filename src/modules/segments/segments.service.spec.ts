@@ -126,39 +126,60 @@ describe('SegmentsService.update', () => {
   };
 
   const build = () => {
-    const segmentRepository: any = {
-      findOne: jest.fn().mockResolvedValue({ ...stored }),
-      update: jest.fn().mockResolvedValue({ affected: 1 }),
+    const update = jest.fn<
+      Promise<{ affected: number }>,
+      [unknown, Record<string, unknown>]
+    >(() => Promise.resolve({ affected: 1 }));
+    const segmentRepository = {
+      findOne: jest.fn(() => Promise.resolve({ ...stored })),
+      update,
     };
-    const segmentCacheService: any = {
-      getSegment: jest.fn().mockResolvedValue(null),
-      cacheSegment: jest.fn().mockResolvedValue(undefined),
+    const segmentCacheService = {
+      getSegment: jest.fn(() => Promise.resolve(null)),
+      cacheSegment: jest.fn(() => Promise.resolve()),
     };
-    const eventEmitter: any = { emit: jest.fn() };
     const db = {
       getRepository: () => segmentRepository,
     } as unknown as TenantDbContext;
 
     const service = new SegmentsService(
       db,
-      {} as any,
-      {} as any,
-      segmentCacheService,
-      eventEmitter,
+      {} as never,
+      {} as never,
+      segmentCacheService as never,
+      { emit: jest.fn() } as never,
     );
-    return { service, segmentRepository };
+    const changesOf = (call: number) => update.mock.calls[call][1];
+    return { service, update, changesOf };
   };
 
-  it('clears last_computed_at so the next computation reprocesses every event', async () => {
-    const { service, segmentRepository } = build();
+  it('clears last_computed_at when the definition changes, so the next computation reprocesses every event', async () => {
+    const { service, changesOf } = build();
 
     await service.update('seg-1', {
       definition: { entryNode: { id: 'entry', type: 'Or' }, nodes: [] },
-    } as any);
+    } as never);
 
-    const [, changes] = segmentRepository.update.mock.calls[0];
-    expect(typeof changes.lastComputedAt).toBe('function');
-    expect(changes.lastComputedAt()).toBe('NULL');
+    const changes = changesOf(0);
+    const lastComputedAt = changes.lastComputedAt as () => string;
+    expect(typeof lastComputedAt).toBe('function');
+    expect(lastComputedAt()).toBe('NULL');
     expect(changes.definitionUpdatedAt).toBeInstanceOf(Date);
+  });
+
+  it('keeps the computed state when only the name changes', async () => {
+    const { service, changesOf } = build();
+
+    await service.update('seg-1', { name: 'Renamed' } as never);
+
+    expect(changesOf(0)).toEqual({ name: 'Renamed' });
+  });
+
+  it('skips the write when the body carries no field', async () => {
+    const { service, update } = build();
+
+    await service.update('seg-1', { name: undefined } as never);
+
+    expect(update).not.toHaveBeenCalled();
   });
 });
