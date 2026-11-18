@@ -248,7 +248,10 @@ export class SegmentsService {
       { id },
       {
         ...updateSegmentDto,
-        lastComputedAt: undefined,
+        // TypeORM skips undefined, which would leave the old timestamp: the next
+        // computation wipes the ClickHouse state and then reads only events
+        // newer than it, emptying the segment.
+        lastComputedAt: () => 'NULL',
         definitionUpdatedAt: new Date(),
       },
     );

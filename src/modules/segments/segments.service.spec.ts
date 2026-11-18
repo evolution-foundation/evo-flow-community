@@ -111,3 +111,54 @@ describe('SegmentsService.previewByDefinition', () => {
     ).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('SegmentsService.update', () => {
+  const stored = {
+    id: 'seg-1',
+    name: 'Segment',
+    definition: { entryNode: { id: 'entry', type: 'Everyone' }, nodes: [] },
+    status: 'running',
+    computedCount: 0,
+    contactsCount: 16,
+    lastComputedAt: new Date('2026-11-18T11:35:00Z'),
+    createdAt: new Date('2026-11-18T11:30:00Z'),
+    updatedAt: new Date('2026-11-18T11:30:00Z'),
+  };
+
+  const build = () => {
+    const segmentRepository: any = {
+      findOne: jest.fn().mockResolvedValue({ ...stored }),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    const segmentCacheService: any = {
+      getSegment: jest.fn().mockResolvedValue(null),
+      cacheSegment: jest.fn().mockResolvedValue(undefined),
+    };
+    const eventEmitter: any = { emit: jest.fn() };
+    const db = {
+      getRepository: () => segmentRepository,
+    } as unknown as TenantDbContext;
+
+    const service = new SegmentsService(
+      db,
+      {} as any,
+      {} as any,
+      segmentCacheService,
+      eventEmitter,
+    );
+    return { service, segmentRepository };
+  };
+
+  it('clears last_computed_at so the next computation reprocesses every event', async () => {
+    const { service, segmentRepository } = build();
+
+    await service.update('seg-1', {
+      definition: { entryNode: { id: 'entry', type: 'Or' }, nodes: [] },
+    } as any);
+
+    const [, changes] = segmentRepository.update.mock.calls[0];
+    expect(typeof changes.lastComputedAt).toBe('function');
+    expect(changes.lastComputedAt()).toBe('NULL');
+    expect(changes.definitionUpdatedAt).toBeInstanceOf(Date);
+  });
+});
